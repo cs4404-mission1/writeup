@@ -1,5 +1,12 @@
 # Infrastructure
 
+We configured our VMs as follows:
+
+1. API
+2. DNS
+3. CA and keyserver
+4. Attacker/client/admin
+
 ## Configure DNS Server
 
 The DNS server simply serves to answer authoritatively for the `.internal` top level domain. We chose the `unbound` DNS resolver package - a notable departure from an industry standard authoritative DNS server like BIND, NSD, or Knot. Unbound is premierely a recursive resolver, but supports serving static local zones authoritatively and uses a single simple configuration file.
@@ -48,26 +55,18 @@ Synchronizing state of unbound.service with SysV service script with /lib/system
 Executing: /lib/systemd/systemd-sysv-install enable unbound
 ```
 
+## Configure Certificate Authority
 
-
-
-Add CA root certificate:
+The certificate authority runs a custom ACME protocol implementation that we developed in Go. Upon first execution, it generates the CA key and certificate, as well as a signed certificate for `ca.internal` and `keyserver.internal`. The program can be compiled and built with `make ca` after cloning `https://github.com/cs4404-mission1/ca`. The root certificate will be saved as `ca-crt.pem` and must be copied to the rest of the VMs as follows:
 
 ```bash
-sudo cp DigiShue_Root_CA.pem /etc/ssl/certs/
+sudo cp ca-crt.pem /etc/ssl/certs/DigiShue_Root_CA.pem
 sudo update-ca-certificates --fresh
 ```
 
+## Setup key server VLAN
 
-
-VMs:
-
-1. API
-2. DNS
-3. CA and keyserver
-4. Attacker/client/admin
-
-### Setup keyserver VLAN between CA and API
+For security, the key server and API communicate on an isolated VLAN. We create a VLAN on the CA and API to facilitate this communication:
 
 CA:
 ```bash

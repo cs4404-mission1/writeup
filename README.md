@@ -411,50 +411,29 @@ The `dnsChallenge` function is defined in `challenge.go` and contains `_acme-cha
 The function creates a DNS message and sends it to a resolver:
 
 ```go
-func dnsChallenge(domain string) (string, error) {
-	var (
-		local  = net.ParseIP("10.64.10.3")
-		remote = net.ParseIP("10.64.10.2")
-	)
+m := new(dns.Msg)
+m.Id = uint16(rand.Intn(65535))
+m.RecursionDesired = true
+m.Question = []dns.Question{{
+    Name:   dns.Fqdn("_acme-challenge." + domain),
+    Qtype:  dns.TypeTXT,
+    Qclass: dns.ClassINET,
+}}
 
-	m := new(dns.Msg)
-	m.Id = uint16(rand.Intn(65535))
-	m.RecursionDesired = true
-	m.Question = []dns.Question{{
-		Name:   dns.Fqdn("_acme-challenge." + domain),
-		Qtype:  dns.TypeTXT,
-		Qclass: dns.ClassINET,
-	}}
+conn, err := net.DialUDP(
+    "udp",
+    &net.UDPAddr{IP: local, Port: 50000},
+    &net.UDPAddr{IP: remote, Port: 53},
+)
+if err != nil {
+    return "", err
+}
+defer conn.Close()
 
-	conn, err := net.DialUDP(
-		"udp",
-		&net.UDPAddr{IP: local, Port: 50000},
-		&net.UDPAddr{IP: remote, Port: 53},
-	)
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-
-	client := dns.Client{Net: "udp"}
-	r, _, err := client.ExchangeWithConn(m, &dns.Conn{Conn: conn})
-	if err != nil {
-		return "", err
-	}
-
-	if r.Rcode != dns.RcodeSuccess {
-		return "", fmt.Errorf("DNS query failed: %s", dns.RcodeToString[r.Rcode])
-	}
-
-	if len(r.Answer) == 0 {
-		return "", fmt.Errorf("no answer")
-	}
-
-	if t, ok := r.Answer[0].(*dns.TXT); !ok {
-		return "", fmt.Errorf("unexpected answer type: %T", r.Answer[0])
-	} else {
-		return t.Txt[0], nil
-	}
+client := dns.Client{Net: "udp"}
+r, _, err := client.ExchangeWithConn(m, &dns.Conn{Conn: conn})
+if err != nil {
+    return "", err
 }
 ```
 

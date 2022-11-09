@@ -1,17 +1,93 @@
-# CS4404 Mission 1: Election System
+# Compromising a Browser-Based Voting System
 
 Nate Sales and Jake Ellington
 
+Worcester Polytechnic Institute
+
 ## Infrastructure
+The infrastructure consists of three primary servers and an attacker. The first server, known as `api.internal`, hosts the web interface for voting, the voter database, the ballot database, and a vote tallying function. The second server, `dns.internal`, provides a DNS resolver. The Third server, `ca.internal`, serves as a certificate authority for TLS communications and hosts a keystore for the `api` server. 
 
-We configured our VMs as follows:
 
-1. Voting API and web UI
-2. DNS Resolver
-3. Certificate authority and key server
-4. Attacker
+### Web Voting Server
+The first virtual machine, `api.internal`, handles all web traffic, user authentication and authorization, and a database of cast votes. This is all done by a single binary written in Rust and using the Rocket API. 
 
-### Configure DNS Server
+The voting system must meet three primary security goals that are in opposition to each other: the voter must be authorized to vote, they must vote only once, and the content of the vote must not be linked to the voter. The web server addresses this by first requiring users to enter a social security number and password. This data is sent to a form handler which salts and hashes the password with industry-standard argon2 and compares it to a hash in a sqlite database. If these hashes match,(confidentiality) the server picks an identifier number and adds it to a list of authorized numbers in memory. It then sets the user’s password hash in the database to 0, a value which will never be output by the argon2 hashing algorithm, thus preventing more than one login per user. The server then creates, signs, and encrypts this value in a cookie with AES-256-GCM and sends it to the client. This process is shown in the snippet below:
+```rust
+#[post("/login", data = "<user>")]
+async fn userlogon(db: Connection<Vote>, state: &State<Persist>, cookies: &CookieJar<'_>, user: Form<User<'_>>) -> Redirect{
+    let authok: bool;
+    match hash_password(user.password.to_string()){ // argon 2 salt and hash
+        Ok(hash) => {
+            // retrieve the user record from sqlite
+            match get_password(db, user.ssn).await{ 
+                // authok is true if the known hash and entered password's hash match
+                Some(tmp) => authok = hash == tmp, 
+                None => authok = false,
+            }
+            },
+        // If the user input fails automatic sanitization, send them back to login
+        Err(_) => return Redirect::to(uri!(index())), 
+    }
+    if authok{
+        println!("authentication OK");
+        // get next auth number in sequence
+        let rndm: String = (state.votekey.fetch_add(1, Ordering::Relaxed) + 1).to_string(); 
+        // give client encrypted cookie with sequence number as payload
+        cookies.add_private(Cookie::new("votertoken", rndm.clone())); 
+        // tell authtoken thread to add new number to list of authorized keys
+        state.rktsnd.send((1, rndm)).unwrap(); 
+        // redirect authorized user to voting form
+        return Redirect::to(uri!(vote()));
+    }
+    // redirect unauthorized user back to login
+    Redirect::to(uri!(index()))
+}
+```
+ The client is redirected to a ballot and when this form is processed the server retrieves, decrypts, and checks the client’s cookie against the authorized list. If the contents match, the vote is recorded in the database, the identifier is removed from the authorized list, and the cookie is removed from the client. The identifier value in the cookie and the recorded vote are never associated with the identity of the user. This code is shown below:
+ ```rust
+ #[post("/vote", data = "<vote>")]
+async fn recordvote(mut db: Connection<Vote>, state: &State<Persist>, cookies: &CookieJar<'_>, vote: Form<Ballot<'_>>) -> Redirect{
+    let mut status = 1;
+    let key: String;
+    // retrieve cookie from user
+    match cookies.get_private("votertoken"){
+        Some(crumb) => {
+            // get auth sequence number from cookie
+            key = crumb.value().to_string();
+            // send verification request to authtoken thread
+            state.rktsnd.send((0, key.clone())).unwrap();
+            // wait for authtoken responce
+            loop{
+                let out = state.rktrcv.recv_timeout(Duration::from_millis(10)).unwrap();
+                if out.1 == key{
+                    status = out.0;
+                    break;
+                }
+            }
+            //remove cookie from user
+            cookies.remove_private(crumb);
+        }
+        //if the user doesn't have a cookie, send them to login
+        None => return Redirect::to(uri!(index())),
+    }
+    if status == 0{
+        // run sql command to incriment vote tally for selected candidate (form input is santitized automatically)
+        sqlx::query("UPDATE Votes SET count = (SELECT count FROM Votes WHERE name = ?)+1 WHERE name = ?;")
+        .bind(vote.candidate).bind(vote.candidate).execute(&mut *db).await.unwrap();
+        // tell authtoken thread to invalidate user's sequence number so a replay cannot be done
+        state.rktsnd.send((2, key)).unwrap();
+        // tell user everything worked
+        Redirect::to(uri!(done()))
+    }
+    else{ 
+    // assume something's gone wrong and direct user back to logon page
+    Redirect::to(uri!(index()))
+    }
+    
+}
+ ```
+ Unauthenticated can visit the “results” directory of the website which shows a tally of the votes for each candidate.
+### DNS Server
 
 The DNS server simply serves to answer authoritatively for the `.internal` top level domain. We chose the `unbound` DNS resolver package - a notable departure from an industry standard authoritative DNS server like BIND, NSD, or Knot. Unbound is premierely a recursive resolver, but supports serving static local zones authoritatively and uses a single simple configuration file.
 

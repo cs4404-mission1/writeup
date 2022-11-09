@@ -2,7 +2,7 @@
 
 ## Reconnaissance
 
-We begin our reconnaissance phase by enumerating DNS records for the `internal` TLD. We wrote the `dnscan.sh` utility to iterate over a wordlist and attempt an `A` query for each possible subdomain.
+We begin our reconnaissance phase by enumerating DNS records for the `internal` TLD. We wrote a simple utility to iterate over a wordlist and attempt an `A` query for each possible subdomain.
 
 ```bash
 #!/bin/bash
@@ -37,7 +37,7 @@ ca.internal -> 10.64.10.3
 keyserver.internal -> 172.16.10.1
 ```
 
-We see a few hosts within our local 10.64.10.x network, and `keyserver.internal` in another network.
+We see a few hosts within our local 10.64.10.x network, and `keyserver.internal` in another network. [V-NET-01]
 
 Beginning with the CA, we scan for open ports with a TCP SYN scan:
 
@@ -375,7 +375,7 @@ listening on ens3, link-type EN10MB (Ethernet), capture size 262144 bytes
 
 After a few minutes, a 802.1Q frame appears on the wire, tagged with VLAN 10. This aligns with the common network practice of encoding a VLAN tag into the third octet of an IPv4 address; notably the 10 in `172.16.10.1`.
 
-### Network Vulnerability 1: Unprotected trunk ports [V-NET-01]
+### Network Vulnerability 1: Unprotected trunk ports [V-NET-02]
 
 Next, we create an interface to hop into VLAN 10:
 

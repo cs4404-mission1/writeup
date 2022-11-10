@@ -502,46 +502,6 @@ func randHex() string {
 
 This function calls `rand.Intn` in a loop over a 32 byte slice, so we need to drain 32 integers from the exploit host's PRNG before attempting to forge a response to the CA.
 
-### Webserver: nmap scanning
-The first step of surveiling the webserver was to perform a scan of the host to find any valueable information. To do this, we executed `nmap -v -A api.internal` whose output can be found in appendix B figure 1. Abridged output only including pertainant information follows:
-```zsh
-Nmap scan report for api.internal (10.64.10.1)
-Not shown: 998 closed tcp ports (conn-refused)
-PORT    STATE SERVICE   VERSION
-22/tcp  open  ssh       OpenSSH 8.2p1 Ubuntu 4ubuntu0.5 (Ubuntu Linux; protocol 2.0)
-...
-443/tcp open  ssl/https PWNED
-| ssl-cert: Subject: organizationName=DigiShue CA
-| Subject Alternative Name: DNS:api.internal
-| Issuer: organizationName=DigiShue CA
-...
-1 service unrecognized despite returning data. If you know the service/version, please submit the following fingerprint at https://nmap.org/cgi-bin/submit.cgi?new-service :
-...
-|   HTTPOptions: 
-|     HTTP/1.0 404 Not Found
-...
-|     <small>Rocket</small>
-```
-The server only has two ports open: SSH and HTTPS, and nmap cannot identify the http server. However, this still contains very useful information. One of `nmap`'s requests returned 404 and part of the 404 response was the word rocket. A simple web search of "rocket web server" returns information about the the Rust Rocket API. Now we know what this webserver was built with. Additionally, the server's SSL certificate was issued by DigiShue CA, so we now now which CA must be attacked. 
-
-### Webserver: Client-side exploration
-The `nmap` scan of the server did not yeild any obviously exploitable vectors other than the possibility of brute-force guessing a password over ssh, but that would be so pedestrian. Instead, we now interact with the website through Firefox and valid login credentials. 
-
-The first item of note is that the server uses no client-side processing or scripting that could be influenced and values are rendered into the HTML at the time of request. Additionally, all forms are submitted via POST and the server uses strict TLS 1.3, so a downgrade or interception attack are not feasible. However, we did notice that the server gives the user a cookie after successfully logging in. For example, we recieved
-```
-votertoken:"DA%2FZytKeNZ+deMcdVhUo5TZM1j8YMI7arqOvwnc%3D"
-```
-Decoding this from URL encoding, we get the value `DA/ZytKeNZ deMcdVhUo5TZM1j8YMI7arqOvwnc=`. This lools like an encrypted value. 
-
-### Webserver: Rise of the Cookie Monster
-Knowing that the server was built with the Rocket API and that it seems to be serving encrypted cookies, we then investigated if Rocket has a mecanism for encrypting cookies. In fact, it does. According to the Rocket guide (https://rocket.rs/v0.5-rc/guide/requests/#private-cookies):
-> For sensitive data, Rocket provides private cookies. Private cookies are similar to regular cookies except that they are encrypted using authenticated encryption, a form of encryption which simultaneously provides confidentiality, integrity, and authenticity. Thus, private cookies cannot be inspected, tampered with, or manufactured by clients.
-
-Can't be manufactured by clients, eh? We'll see about that. Further in the same section, the guide states 
->To encrypt private cookies, Rocket uses the 256-bit key specified in the secret_key configuration parameter. [...] The value of the parameter may either be a 256-bit base64 or hex string or a 32-byte slice.
-
-Without this key, defeating the encryption of the cookie would be impossible, but the previous `nmap` scanning of the CA server showed it also identified itself as keyserver.internal. 
-
 ## Attack
 ### Developing a chained exploit path
 
@@ -688,6 +648,64 @@ dce1360e4bc9a3a929a9dd5115e7977faac1f514febcf18fc036eebe3dffbc02
 ```
 
 Retrying the request a few times returns the same 64 character hex string. This appears to be a key used by the API for encryption.
+
+### Cookie Capture and Decryption
+
+The first step of surveiling the webserver was to perform a scan of the host to find any valueable information. To do this, we executed `nmap -v -A api.internal` whose output can be found in appendix B figure 1. Abridged output only including pertainant information follows:
+```zsh
+Nmap scan report for api.internal (10.64.10.1)
+Not shown: 998 closed tcp ports (conn-refused)
+PORT    STATE SERVICE   VERSION
+22/tcp  open  ssh       OpenSSH 8.2p1 Ubuntu 4ubuntu0.5 (Ubuntu Linux; protocol 2.0)
+...
+443/tcp open  ssl/https PWNED
+| ssl-cert: Subject: organizationName=DigiShue CA
+| Issuer: organizationName=DigiShue CA
+...
+1 service unrecognized despite returning data. If you know the service/version, please submit the following fingerprint at https://nmap.org/cgi-bin/submit.cgi?new-service :
+...
+|   HTTPOptions: 
+|     HTTP/1.0 404 Not Found
+...
+|     <small>Rocket</small>
+```
+The server only has two ports open: SSH and HTTPS, and nmap cannot identify the http server. However, this still contains very useful information. One of `nmap`'s requests returned 404 and part of the 404 response was the word rocket. A simple web search of "rocket web server" returns information about the the Rust Rocket API. Now we know with what the webserver was built. 
+
+The next step was to log in to the server using valid credentials and analize its communications. The server gives the user a cookie after successfully logging in, for example we recieved
+```
+votertoken:"DA%2FZytKeNZ+deMcdVhUo5TZM1j8YMI7arqOvwnc%3D"
+```
+which appears to be an encrypted value. 
+
+Knowing that the server was built with the Rocket API and that it seems to be serving encrypted cookies, we then investigated if Rocket has a mechanism for encrypting cookies. In fact, it does. According to the Rocket guide (https://rocket.rs/v0.5-rc/guide/requests/#private-cookies):
+> For sensitive data, Rocket provides private cookies. Private cookies are similar to regular cookies except that they are encrypted using authenticated encryption, a form of encryption which simultaneously provides confidentiality, integrity, and authenticity. Thus, private cookies cannot be inspected, tampered with, or manufactured by clients.
+
+Can't be manufactured by clients, eh? We'll see about that. Further in the same section, the guide states 
+>To encrypt private cookies, Rocket uses the 256-bit key specified in the secret_key configuration parameter. [...] The value of the parameter may either be a 256-bit base64 or hex string or a 32-byte slice.
+
+This description exactly matches the key recovered from the keyserver in the previous step. Looking through the rocket source code, it impliments the library cookie-rs (https://github.com/SergioBenitez/cookie-rs) for cookie handling, which in turn has a private-cookie functionality which impliments AES-GCM. Using Cookie-rs's cryptography code as a base and the known secret key, we were able to successfully decrypt and re-ecrypt the cookie from the api server. A portion of the decryption source code follows:
+```rust
+// Credit: cookie-rs by Sergio Benitez
+    let data = base64::decode(cstring).map_err(|_| "bad base64 value")?;
+    if data.len() <= NONCE_LEN {
+        return Err("length of decoded data is <= NONCE_LEN");
+    }
+
+    let (nonce, cipher) = data.split_at(NONCE_LEN);
+    let payload = Payload { msg: cipher, aad: name.as_bytes() };
+
+    let aead = Aes256Gcm::new(GenericArray::from_slice(key.encryption().try_into().unwrap()));
+    aead.decrypt(GenericArray::from_slice(nonce), payload)
+        .map_err(|_| "invalid key/nonce/value: bad seal")
+        .and_then(|s| String::from_utf8(s).map_err(|_| "bad unsealed utf8"))
+```
+*source: https://github.com/SergioBenitez/cookie-rs/blob/master/src/secure/private.rs*
+
+The decrypted value from this operation is the string representaiton of an integer, presumably a value that is incrimented for each user as they log on. By incrimenting this value ourselves and generating and encrypting a new cookie with this new value, we will have the authorization token of the next person who logs in to vote.
+
+### Cookie Monster
+
+### Auto Vote
 
 ## Defense
 

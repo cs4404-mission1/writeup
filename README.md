@@ -701,11 +701,31 @@ This description exactly matches the key recovered from the keyserver in the pre
 ```
 *source: https://github.com/SergioBenitez/cookie-rs/blob/master/src/secure/private.rs*
 
-The decrypted value from this operation is the string representaiton of an integer, presumably a value that is incrimented for each user as they log on. By incrimenting this value ourselves and generating and encrypting a new cookie with this new value, we will have the authorization token of the next person who logs in to vote.
+The decrypted value from this operation is the string representaiton of an integer, in this case `"10"`, presumably a value that is incrimented for each user as they log on. By incrimenting this value ourselves and generating and encrypting a new cookie with this new value, we will have the authorization token of the next person who logs in to vote.
 
 ### Cookie Monster
+To exploit this, we wrote the rust program Cookie Monster, which carries out this section of the attack automatically. It first logs in to the web server with valid credentials to fetch a cookie, then it vote as normal using this cookie. Cookie Monster then decrypts the contents of the cookie using a secret key passed via the command line, extracts its sequence number, incriments it, and creates a new cookie with this new sequence number. This cookie is signed, encrypted, and used to register another vote. 
 
+Registering another vote may not immediatley work as the forged cookie needs a valid user to log in to make its sequence number valid. Cookie Monster will keep re-trying voting with a cookie until the vote is accepted, then it makes a new incrimented cookie and repeates the process. By doing this, we are depriving all voters who attempt to cast ballots after Cookie Monster is started of their vote and using their credentials to cast our own ballots. This process will repeat until a keyboard interrupt is given. A snippet of this code follows: 
+```rust
+loop{
+  // send a new vote with our forged cookie
+  let fakevote = client.post("https://api.internal:443/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+  {
+    let mut store = jar.lock().unwrap();
+    // check if vote worked
+    if fakevote.text().await.unwrap().contains("Thanks for voting"){
+        println!("Voted for gus with sequence number {}",&sequence_num);
+        store.clear();
+        sequence_num += 1;}
+        let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string(),&secret));
+        // webserver will have removed our cookie regardless of auth success so we need to put it back
+        store.insert_raw(&newcookie, &Url::parse("https://api.internal").unwrap()).unwrap();
+  }
+}
+```
 ### Auto Vote
+Autovote is a python script which combines all of the previous exploits into one fully automated executable. It registers a virtual interface on VLAN 10 by calling the `ip` command, runs the `exploit` go executable, retrieves the secret key via the requests library, and launces cookie monster with said key. An example of its output can be found in Appendix B figure 3.
 
 ## Defense
 

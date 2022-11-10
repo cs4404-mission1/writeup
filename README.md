@@ -526,9 +526,21 @@ The server only has two ports open: SSH and HTTPS, and nmap cannot identify the 
 
 ### Webserver: Client-side exploration
 The `nmap` scan of the server did not yeild any obviously exploitable vectors other than the possibility of brute-force guessing a password over ssh, but that would be so pedestrian. Instead, we now interact with the website through Firefox and valid login credentials. 
+
+The first item of note is that the server uses no client-side processing or scripting that could be influenced and values are rendered into the HTML at the time of request. Additionally, all forms are submitted via POST and the server uses strict TLS 1.3, so a downgrade or interception attack are not feasible. However, we did notice that the server gives the user a cookie after successfully logging in. For example, we recieved
 ```
 votertoken:"DA%2FZytKeNZ+deMcdVhUo5TZM1j8YMI7arqOvwnc%3D"
 ```
+Decoding this from URL encoding, we get the value `DA/ZytKeNZ deMcdVhUo5TZM1j8YMI7arqOvwnc=`. This lools like an encrypted value. 
+
+### Webserver: Rise of the Cookie Monster
+Knowing that the server was built with the Rocket API and that it seems to be serving encrypted cookies, we then investigated if Rocket has a mecanism for encrypting cookies. In fact, it does. According to the Rocket guide (https://rocket.rs/v0.5-rc/guide/requests/#private-cookies):
+> For sensitive data, Rocket provides private cookies. Private cookies are similar to regular cookies except that they are encrypted using authenticated encryption, a form of encryption which simultaneously provides confidentiality, integrity, and authenticity. Thus, private cookies cannot be inspected, tampered with, or manufactured by clients.
+
+Can't be manufactured by clients, eh? We'll see about that. Further in the same section, the guide states 
+>To encrypt private cookies, Rocket uses the 256-bit key specified in the secret_key configuration parameter. [...] The value of the parameter may either be a 256-bit base64 or hex string or a 32-byte slice.
+
+Without this key, defeating the encryption of the cookie would be impossible, but the previous `nmap` scanning of the CA server showed it also identified itself as keyserver.internal. 
 
 ## Attack
 ### Developing a chained exploit path

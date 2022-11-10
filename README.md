@@ -14,7 +14,26 @@ Election Systems have three primary security goals which are seemingly in opposi
 Our security model aims to address this by using mutual TLS (mTLS) wherever possible, anonymized authentication cookies, secure cryptography for client authentication cookies, and an isolated VLAN for secure communication. We chose to compromise the public key infrastructure (PKI) supply chain by exploiting a series of vulnerabilities to compromise the certificate authority with the intention of breaking mTLS client authentication. Furthermore, we exploit a vulnerability in the voting API used to predict future authorization tokens and hijack votes from legitimate users before they are able to vote legitimately.
 
 ## Mission Reconnaissance  
+### Consequences of Unmet Goals
+**Confidentiality**: If this goal were to be unmet and the votes of citizens could be linked to their identity, not only would the privacy of voters be violated but the integrity of the election would also be compromised. An election is not valid if voters can be intimidated, threatened, or otherwise influenced due to the public nature of their ballot.
 
+**Authenticity**: If the authenticity of voters is not properly verified in an online voting system, a single actor could vote multiple times, thus unduly influencing the outcome and invalidating the election.
+
+**Integrity**: If the integrity of an election is compromised in any way, the core of the entire political system is compromised. Results may include a corrupt or harmful figure or group coming to power. In fact, even unfounded claims of electoral integrity violations can cause significant political turmoil (see: United State of America)
+
+### Ways in which these goals can be violated
+**Confidentiality**: If the database system recorded which user ID voted for which candidate to ensure authenticity, a leak of that database would violate confidentiality. A similar issue could be presented when using time stamps; if a system logs that a user logs in and that a vote is cast at the same instant, a threat actor could correlate these events. Confidentiality could also be violated if the webserver used insecure HTTP communications with its clients, either by design or by a downgrade attack.
+
+**Authenticity**: Authenticity may be violated via a credential replay attack or a flaw in the user authentication mechanism.
+
+**Integrity**: Integrity may be violated by violations of either of the previous security goals or by direct compromise of the voting server. If a threat actor were to get an SSH shell or connection to a SQL prompt, the integrity would be violated. Additionally, if the threat actor were to compromise a link in the chain of trust of the web server such as a certificate authority or DNS server, the election could be subverted. 
+
+### Possible Countermeasures
+**Confidentiality**: A 2-stage authentication system that uses a username and password and yields an anonymous authentication token generated at the time of request would significantly decrease the likelihood of linking votes to voters.
+
+**Authenticity**: The aforementioned authentication system could be extended to have a flag in the database that only allows a user to log in once. Additionally a simpler ip-based system could be used alongside the token system to mitigate token brute-force or prediction.
+
+**Integrity**: Ensuring the server uses best practices in terms of security configuration: TLS, only using secure networks for sensitive communications, only essential ports open, should mitigate most integrity-violating attacks when used in concert with the previous two.
 
 ## Infrastructure
 The infrastructure consists of three primary servers and an attacker. The first server, known as `api.internal`, hosts the web interface for voting, the voter database, the ballot database, and a vote tallying function. The second server, `dns.internal`, provides a DNS resolver. The Third server, `ca.internal`, serves as a certificate authority for TLS communications and hosts a keystore for the `api` server. 

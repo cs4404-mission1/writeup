@@ -501,6 +501,35 @@ func randHex() string {
 ```
 
 This function calls `rand.Intn` in a loop over a 32 byte slice, so we need to drain 32 integers from the exploit host's PRNG before attempting to forge a response to the CA.
+
+### Webserver: nmap scanning
+The first step of surveiling the webserver was to perform a scan of the host to find any valueable information. To do this, we executed `nmap -v -A api.internal` whose output can be found in appendix B figure 1. Abridged output only including pertainant information follows:
+```zsh
+Nmap scan report for api.internal (10.64.10.1)
+Not shown: 998 closed tcp ports (conn-refused)
+PORT    STATE SERVICE   VERSION
+22/tcp  open  ssh       OpenSSH 8.2p1 Ubuntu 4ubuntu0.5 (Ubuntu Linux; protocol 2.0)
+...
+443/tcp open  ssl/https PWNED
+| ssl-cert: Subject: organizationName=DigiShue CA
+| Subject Alternative Name: DNS:api.internal
+| Issuer: organizationName=DigiShue CA
+...
+1 service unrecognized despite returning data. If you know the service/version, please submit the following fingerprint at https://nmap.org/cgi-bin/submit.cgi?new-service :
+...
+|   HTTPOptions: 
+|     HTTP/1.0 404 Not Found
+...
+|     <small>Rocket</small>
+```
+The server only has two ports open: SSH and HTTPS, and nmap cannot identify the http server. However, this still contains very useful information. One of `nmap`'s requests returned 404 and part of the 404 response was the word rocket. A simple web search of "rocket web server" returns information about the the Rust Rocket API. Now we know what this webserver was built with. Additionally, the server's SSL certificate was issued by DigiShue CA, so we now now which CA must be attacked. 
+
+### Webserver: Client-side exploration
+The `nmap` scan of the server did not yeild any obviously exploitable vectors other than the possibility of brute-force guessing a password over ssh, but that would be so pedestrian. Instead, we now interact with the website through Firefox and valid login credentials. 
+```
+votertoken:"DA%2FZytKeNZ+deMcdVhUo5TZM1j8YMI7arqOvwnc%3D"
+```
+
 ## Attack
 ### Developing a chained exploit path
 

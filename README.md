@@ -67,6 +67,8 @@ ExecStart=/etc/vote/voter-api
 Restart=on-failure
 ```
 The `client` program called by systemd is a small program that establishes an MTLS handshake with the internal keyserver, retrieves the latest key, and writes it to Rocket's configuration file. 
+
+Screenshots of this web interface are available in Appendix A Figures 3 and 4.
  
 ### DNS Server
 
@@ -755,6 +757,8 @@ loop{
   }
 }
 ```
+The original design documentation for this component is available in Appendix B figure 4. Please note that the "crashers" referred to in the document do not exist in the production version of this exploit.
+
 ### Auto Vote
 Autovote is a python script which combines all of the previous exploits into one fully automated executable. It registers a virtual interface on VLAN 10 by calling the `ip` command, runs the `exploit` go executable, retrieves the secret key via the requests library, and launces cookie monster with said key. An example of its output can be found in Appendix B figure 3.
 
@@ -1025,6 +1029,15 @@ async fn recordvote(mut db: Connection<Vote>, state: &State<Persist>, cookies: &
 }
  ```
 *Figure 2: The main vote recording function of the Vote API, including token-based authorization*
+
+![login page](https://github.com/cs4404-mission1/writeup/blob/main/assets/voteapi-login.png)
+
+*Figure 3: the login form page of the web interface.*
+
+![ballot page with dev tools](https://github.com/cs4404-mission1/writeup/blob/main/assets/secinspect-cookies.png)
+
+*Figure 3: the ballot page of the web interface with Firefox developer tools showing the votertoken cookie*
+
 ## Appendix B
 ```zsh
 Nmap scan report for api.internal (10.64.10.1)
@@ -1226,3 +1239,7 @@ Thank you for choosing us to subvert your election <3
 student@client:~/hack$
 ```
 *Figure 3: Output of the autovote python script*
+
+![Sequence Diagram for cookie monster - original ideation](https://github.com/cs4404-mission1/writeup/blob/main/assets/cm_sequence.drawio.png)
+
+*Figure 4: Original design documentation for cookiemoster attack*

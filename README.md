@@ -10,6 +10,7 @@ Election Systems have three primary security goals which are seemingly in opposi
 * Confidentiality: The content of a ballot must not be linked to a voter's identity in any way.
 * Integrity: The content of ballots and the overall outcome of the election must not be changed by a threat actor.
 * Authenticity: The system must only record votes from registered voters. Additionally, each voter must only be allowed one vote.
+* Availability: The system must remain online and functional for both voters and vote counting officials no matter what.
 
 Our security model aims to address this by using mutual TLS (mTLS) wherever possible, anonymized authentication cookies, secure cryptography for client authentication cookies, and an isolated VLAN for secure communication. We chose to compromise the public key infrastructure (PKI) supply chain by exploiting a series of vulnerabilities to compromise the certificate authority with the intention of breaking mTLS client authentication. Furthermore, we exploit a vulnerability in the voting API used to predict future authorization tokens and hijack votes from legitimate users before they are able to vote legitimately.
 
@@ -19,7 +20,10 @@ Our security model aims to address this by using mutual TLS (mTLS) wherever poss
 
 **Authenticity**: If the authenticity of voters is not properly verified in an online voting system, a single actor could vote multiple times, thus unduly influencing the outcome and invalidating the election.
 
-**Integrity**: If the integrity of an election is compromised in any way, the core of the entire political system is compromised. Results may include a corrupt or harmful figure or group coming to power. In fact, even unfounded claims of electoral integrity violations can cause significant political turmoil (see: United State of America)
+**Integrity**: If the integrity of an election is compromised in any way, the core of the entire political system is compromised. Results may include a corrupt or harmful figure or group coming to power. In fact, even unfounded claims of electoral integrity violations can cause significant political turmoil (see: United States of America)
+
+**Availability**: If an attacker is able to bring the system offline or compromise its ability to carry out one of its functions, the election results are invalid as it can no loger be assured that every citizen's vote was properly counted.
+
 
 ### Ways in which these goals can be violated
 **Confidentiality**: If the database system recorded which user ID voted for which candidate to ensure authenticity, a leak of that database would violate confidentiality. A similar issue could be presented when using time stamps; if a system logs that a user logs in and that a vote is cast at the same instant, a threat actor could correlate these events. Confidentiality could also be violated if the webserver used insecure HTTP communications with its clients, either by design or by a downgrade attack.
@@ -28,12 +32,16 @@ Our security model aims to address this by using mutual TLS (mTLS) wherever poss
 
 **Integrity**: Integrity may be violated by violations of either of the previous security goals or by direct compromise of the voting server. If a threat actor were to get an SSH shell or connection to a SQL prompt, the integrity would be violated. Additionally, if the threat actor were to compromise a link in the chain of trust of the web server such as a certificate authority or DNS server, the election could be subverted. 
 
+**Availability**: Availability would be violated by a denial of service (DoS) attack in which an attacker sends a large number of requests to a server, designed to overwhelm it and cause it to either crash or drop legitimate traffic by filling the kernel network buffers. Availability could also be compromised through no intentional attack, many legitimate users attemtping to use the service at once could constitute an indavertant DoS attack, as the result is the same. 
+
 ### Possible Countermeasures
 **Confidentiality**: A 2-stage authentication system that uses a username and password and yields an anonymous authentication token generated at the time of request would significantly decrease the likelihood of linking votes to voters.
 
 **Authenticity**: The aforementioned authentication system could be extended to have a flag in the database that only allows a user to log in once. Additionally a simpler ip-based system could be used alongside the token system to mitigate token brute-force or prediction.
 
 **Integrity**: Ensuring the server uses best practices in terms of security configuration: TLS, only using secure networks for sensitive communications, only essential ports open, should mitigate most integrity-violating attacks when used in concert with the previous two.
+
+**Availability**: In the real world, services like CloudFlare offer DDoS protection via traffic analysis and filtering and also by simply having an immense amount of compute power to handle requests. A voting system could make use of multiple servers with a load balancer to spread the load and ensure redundancy, but this could also lead to a double-vote scenario if the servers don't agree on the state of the database. 
 
 ## Infrastructure
 The infrastructure consists of three primary servers and an attacker. The first server, known as `api.internal`, hosts the web interface for voting, the voter database, the ballot database, and a vote tallying function. The second server, `dns.internal`, provides a DNS resolver. The Third server, `ca.internal`, serves as a certificate authority for TLS communications and hosts a keystore for the `api` server. 
@@ -68,8 +76,16 @@ Restart=on-failure
 ```
 The `client` program called by systemd is a small program that establishes an MTLS handshake with the internal keyserver, retrieves the latest key, and writes it to Rocket's configuration file. 
 
-Screenshots of this web interface are available in Appendix A Figures 3 and 4.
- 
+**Screenshots**:
+
+![login page](https://github.com/cs4404-mission1/writeup/blob/main/assets/voteapi-login.png)
+
+*Figure: Login page of voter interface website*
+
+![ballot page with dev tools](https://github.com/cs4404-mission1/writeup/blob/main/assets/secinspect-cookies.png)
+
+*Figure: Ballot page of webserver with developer tools open, showing the secure cookie*
+
 ### DNS Server
 
 The DNS server simply serves to answer authoritatively for the `.internal` top level domain. We chose the `unbound` DNS resolver package - a notable departure from an industry standard authoritative DNS server like BIND, NSD, or Knot. Unbound is primarily a recursive resolver, but supports serving static local zones authoritatively and uses a single simple configuration file.
@@ -1028,13 +1044,6 @@ async fn recordvote(mut db: Connection<Vote>, state: &State<Persist>, cookies: &
     
 }
  ```
-*Figure 2: The main vote recording function of the Vote API, including token-based authorization*
-
-![login page](https://github.com/cs4404-mission1/writeup/blob/main/assets/voteapi-login.png)
-
-*Figure 3: the login form page of the web interface.*
-
-![ballot page with dev tools](https://github.com/cs4404-mission1/writeup/blob/main/assets/secinspect-cookies.png)
 
 *Figure 3: the ballot page of the web interface with Firefox developer tools showing the votertoken cookie*
 
